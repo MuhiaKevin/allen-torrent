@@ -4,10 +4,12 @@ const fs = require('fs');
 const bencode = require('bencode');
 const crypto = require('crypto');
 const bignum = require('bignum');
+let torrent;
 
 module.exports.BLOCK_LEN = Math.pow(2, 14);
 
 module.exports.open = (filepath) => {
+  torrent = bencode.decode(fs.readFileSync(filepath))
   return bencode.decode(fs.readFileSync(filepath));
 };
 
@@ -23,6 +25,26 @@ module.exports.size = torrent => {
 
   return bignum.toBuffer(size, {size: 8});
 };
+
+module.exports.getannouncelist = torrent => {
+    let http_announce_list =[]
+    let udp_announce_list = [];
+
+    if(torrent["announce-list"]){
+      for (let announce of torrent["announce-list"]) {
+        if(announce.toString('utf8').substring(0, 3) === "udp"){
+          udp_announce_list.push(announce.toString('utf8'));
+        }
+        else{
+          http_announce_list.push(announce.toString('utf8'));
+        }
+      }
+      return [http_announce_list, udp_announce_list];
+    }
+    else{
+      return torrent.announce.toString()
+    }
+  }
 
 module.exports.pieceLen = (torrent, pieceIndex) => {
   const totalLength = bignum.fromBuffer(this.size(torrent)).toNumber();

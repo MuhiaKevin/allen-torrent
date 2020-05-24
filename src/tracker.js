@@ -9,10 +9,37 @@ const util = require('./util');
 
 module.exports.getPeers = (torrent, callback) => {
   const socket = dgram.createSocket('udp4');
-  const url = torrent.announce.toString('utf8');
+
+  let announcelist = torrentParser.getannouncelist(torrent);
+  let url = "";
+  let receivedAnnounceResp = false
+  let interval;
+  let count = 0;
+  let requests = 8;
+  const resendSeconds = (2 ** requests) * 15;
+
+  url = typeof (announcelist) === 'object' ? urlParse(announcelist[1].shift()) : announcelist;
+
 
   // 1. send connect request
   udpSend(socket, buildConnReq(), url);
+
+  function retransmit() {
+    if (receivedAnnounceResp != true && count === requests) {
+      console.log(`Trying ${url.hostname}`)
+      url = announcelist.length != 0 ? urlParse(announcelist[1].shift()) : urlParse(announcelist[1][0]);
+      udpSend(socket, buildConnReq(), url);
+      count = 0;
+    }
+    else if (receivedAnnounceResp != true && count <= requests) {
+      console.log(`Retrying ${url.host} again`)
+      udpSend(socket, buildConnReq(), url);
+      count += 1;
+    }
+  }
+
+
+  interval = setInterval(retransmit, resendSeconds)
 
   socket.on('message', response => {
     if (respType(response) === 'connect') {
@@ -22,15 +49,21 @@ module.exports.getPeers = (torrent, callback) => {
       const announceReq = buildAnnounceReq(connResp.connectionId, torrent);
       udpSend(socket, announceReq, url);
     } else if (respType(response) === 'announce') {
+      receivedAnnounceResp = true
+      clearInterval(interval);
       // 4. parse announce response
       const announceResp = parseAnnounceResp(response);
       // 5. pass peers to callback
       callback(announceResp.peers);
+      // when testing local opentracker Bitorrent tracker server
+      if (typeof (url) === 'string' && url.substring(6, 19) === '192.168.1.149') {
+        socket.close()
+      }
     }
   });
 };
 
-function udpSend(socket, message, rawUrl, callback=()=>{}) {
+function udpSend(socket, message, rawUrl, callback = () => { }) {
   const url = urlParse(rawUrl);
   socket.send(message, 0, message.length, url.port, url.hostname, callback);
 }
@@ -63,7 +96,7 @@ function parseConnResp(resp) {
   }
 }
 
-function buildAnnounceReq(connId, torrent, port=6881) {
+function buildAnnounceReq(connId, torrent, port = 6881) {
   const buf = Buffer.allocUnsafe(98);
 
   // connection id
